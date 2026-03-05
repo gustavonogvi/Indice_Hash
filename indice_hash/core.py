@@ -105,6 +105,26 @@ class Bucket:
 
 
 @dataclass
+class SearchResult:
+    chave: str
+    encontrada: bool
+    pagina_id: int | None
+    bucket_id: int
+    custo_leituras: int  # páginas de bucket percorridas + 1 página de dados (se encontrada)
+    tempo_sec: float
+
+
+@dataclass
+class TableScanResult:
+    chave: str
+    encontrada: bool
+    pagina_id: int | None
+    paginas_lidas: int  # custo = páginas percorridas até encontrar (ou total se não encontrada)
+    tempo_sec: float
+    paginas_visitadas: list[int]  # IDs das páginas lidas durante o scan
+
+
+@dataclass
 class IndexStats:
     nr: int
     fr: int
@@ -203,4 +223,86 @@ class StaticHashIndex:
             overflow_buckets=overflow_buckets,
             overflow_pages_created=0,  # não usamos mais essa métrica
             overflow_entries=overflow_entries,
+        )
+
+    def buscar(self, chave: str) -> SearchResult:
+        """
+        Busca por índice hash.
+        Custo = páginas de bucket lidas (1 primário + overflow percorridos) + 1 página de dados se encontrada.
+        """
+        start = perf_counter()
+        bucket_id = self.hash_bucket(chave)
+        bucket = self.buckets[bucket_id]
+
+        custo = 1  # leitura do bucket primário
+
+        # Busca no bucket primário
+        for entry in bucket.primary:
+            if entry.chave == chave:
+                end = perf_counter()
+                return SearchResult(
+                    chave=chave,
+                    encontrada=True,
+                    pagina_id=entry.pagina_id,
+                    bucket_id=bucket_id,
+                    custo_leituras=custo + 1,  # + 1 página de dados
+                    tempo_sec=end - start,
+                )
+
+        # Busca nas páginas de overflow
+        for overflow_page in bucket.overflow_pages:
+            custo += 1  # cada página de overflow é uma leitura extra
+            for entry in overflow_page:
+                if entry.chave == chave:
+                    end = perf_counter()
+                    return SearchResult(
+                        chave=chave,
+                        encontrada=True,
+                        pagina_id=entry.pagina_id,
+                        bucket_id=bucket_id,
+                        custo_leituras=custo + 1,  # + 1 página de dados
+                        tempo_sec=end - start,
+                    )
+
+        end = perf_counter()
+        return SearchResult(
+            chave=chave,
+            encontrada=False,
+            pagina_id=None,
+            bucket_id=bucket_id,
+            custo_leituras=custo,
+            tempo_sec=end - start,
+        )
+
+    @staticmethod
+    def table_scan(chave: str, paginas: list[list[str]]) -> TableScanResult:
+        """
+        Varredura sequencial página por página.
+        Custo = número de páginas lidas até encontrar (ou total se não encontrada).
+        """
+        start = perf_counter()
+        visitadas: list[int] = []
+
+        for pagina_id, pagina in enumerate(paginas, start=1):
+            visitadas.append(pagina_id)
+            for registro in pagina:
+                if registro == chave:
+                    end = perf_counter()
+                    return TableScanResult(
+                        chave=chave,
+                        encontrada=True,
+                        pagina_id=pagina_id,
+                        paginas_lidas=pagina_id,
+                        tempo_sec=end - start,
+                        paginas_visitadas=visitadas,
+                    )
+
+        end = perf_counter()
+        return TableScanResult(
+            chave=chave,
+            encontrada=False,
+            pagina_id=None,
+            paginas_lidas=len(paginas),
+            tempo_sec=end - start,
+            paginas_visitadas=visitadas,
         )

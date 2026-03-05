@@ -2,7 +2,9 @@ from .core import (
     Bucket,
     IndexEntry,
     IndexStats,
+    SearchResult,
     StaticHashIndex,
+    TableScanResult,
     extrair_palavras,
     paginar,
     paginate,
@@ -19,4 +21,7 @@ __all__ = [
     "Bucket",
     "IndexStats",
     "StaticHashIndex",
+    # EPIC 3
+    "SearchResult",
+    "TableScanResult",
 ]
