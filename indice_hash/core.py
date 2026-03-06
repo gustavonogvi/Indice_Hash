@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from hashlib import sha256
 from time import perf_counter
 from typing import Iterable
 
@@ -34,10 +33,19 @@ def extrair_palavras(linhas: Iterable[str]) -> list[str]:
 def paginar(registros: list[str], tamanho_pagina: int) -> list[list[str]]:
     if tamanho_pagina <= 0:
         raise ValueError("Tamanho da pagina deve ser maior que zero.")
-    return [
-        registros[indice : indice + tamanho_pagina]
-        for indice in range(0, len(registros), tamanho_pagina)
-    ]
+
+    # 1. Calcula quantas páginas são necessárias
+    num_paginas = (len(registros) + tamanho_pagina - 1) // tamanho_pagina
+
+    # 2. Aloca todas as páginas vazias (como um BD faz)
+    paginas: list[list[str]] = [[] for i in range(num_paginas)]
+
+    # 3. Insere cada palavra na sua página
+    for i, palavra in enumerate(registros):
+        pagina_id = i // tamanho_pagina
+        paginas[pagina_id].append(palavra)
+
+    return paginas
 
 
 # Compatibilidade com nomes anteriores.
@@ -156,7 +164,7 @@ class StaticHashIndex:
         self.buckets: list[Bucket] = [Bucket(fr) for _ in range(nb)]
 
     @staticmethod
-    def calcular_nb(nr: int, fr: int) -> int:
+    def calcular_nb(nr: int, fr: int, fator_carga: float = 0.7) -> int: #EXPERIMENTAL!!!
         """
         Regra do PDF: NB > NR / FR.
         Escolha simples e segura: NB = floor(NR/FR) + 1
@@ -165,15 +173,20 @@ class StaticHashIndex:
             raise ValueError("FR deve ser maior que zero.")
         if nr < 0:
             raise ValueError("NR invalido.")
-        return (nr // fr) + 1
+        return int(nr / fr/ fator_carga) + 1
 
     def hash_bucket(self, chave: str) -> int:
         """
-        Função hash determinística (não usa hash() do Python).
+        Função hash polinomial com pesos por posição.
+        Cada letra recebe peso primo^posição, evitando colisões entre anagramas.
         Retorna sempre no intervalo [0..NB-1].
         """
-        digest = sha256(chave.encode("utf-8")).hexdigest()
-        valor = int(digest, 16)
+        valor = 0
+        peso = 1
+        primo = 31
+        for char in chave:
+            valor += ord(char) * peso
+            peso *= primo
         return valor % self.nb
 
     def construir(self, paginas: list[list[str]]) -> IndexStats:
@@ -245,7 +258,7 @@ class StaticHashIndex:
                     encontrada=True,
                     pagina_id=entry.pagina_id,
                     bucket_id=bucket_id,
-                    custo_leituras=custo + 1,  # + 1 página de dados
+                    custo_leituras=custo,  # + 1 página de dados
                     tempo_sec=end - start,
                 )
 
